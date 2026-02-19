@@ -1,0 +1,17 @@
+# Grafana instance managed by the Grafana Operator
+apiVersion: grafana.integreatly.org/v1beta1
+kind: Grafana
+metadata:
+  name: subscription-control-grafana
+  namespace: subscription-control
+  labels:
+    dashboards: subscription-control
+spec:
+  config:
+    log:
+      mode: console
+    security:
+      admin_user: admin
+      admin_password: admin
+  route:
+    spec: {}
