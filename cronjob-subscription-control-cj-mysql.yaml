@@ -1,0 +1,100 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: subscription-control-cj
+  namespace: subscription-control
+spec:
+  schedule: "0 23 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      activeDeadlineSeconds: 7200
+      template:
+        metadata:
+          labels:
+            app: subscription-control-cj
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: subscription-control-sa
+
+          volumes:
+            - name: subscription-cpu-cm
+              configMap:
+                name: subscription-cpu
+                defaultMode: 0755
+                items:
+                  - key: subscription-cpu.sh
+                    path: subscription-cpu.sh
+            - name: subscription-db-insert-cm
+              configMap:
+                name: subscription-db-insert
+                defaultMode: 0755
+                items:
+                  - key: subscription-db-insert.sh
+                    path: subscription-db-insert.sh
+            - name: shared-tmp
+              emptyDir: {}
+
+          containers:
+            - name: run-subscription-cpu
+              image: registry.redhat.io/openshift4/ose-cli:latest
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              env:
+                - name: ACMNAME
+                  value: acm-01
+              volumeMounts:
+                - name: subscription-cpu-cm
+                  mountPath: /subscription-cpu
+                  readOnly: true
+                - name: shared-tmp
+                  mountPath: /tmp
+              command:
+                - /bin/sh
+                - -c
+                - /subscription-cpu/subscription-cpu.sh
+
+            - name: run-subscription-db-insert
+              image: registry.redhat.io/rhel9/mysql-80:latest
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 200m
+                  memory: 256Mi
+              env:
+                - name: MYSQL_HOST
+                  value: mysql.subscription-control.svc.cluster.local
+                - name: MYSQL_PORT
+                  value: "3306"
+                - name: MYSQL_DATABASE
+                  value: subscription
+                - name: MYSQL_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: subscription-db-credentials
+                      key: MYSQL_USER
+                - name: MYSQL_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: subscription-db-credentials
+                      key: MYSQL_PASSWORD
+              volumeMounts:
+                - name: subscription-db-insert-cm
+                  mountPath: /subscription-db-insert
+                  readOnly: true
+                - name: shared-tmp
+                  mountPath: /tmp
+              command:
+                - /bin/sh
+                - -c
+                - /subscription-db-insert/subscription-db-insert.sh

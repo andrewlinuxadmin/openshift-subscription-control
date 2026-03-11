@@ -11,6 +11,7 @@ FAILFILE="/tmp/fail.txt"
 PARALLEL="${PARALLEL:-8}"
 SUBSTYPELABEL="${SUBSTYPELABEL:-subscription-type}"
 TOKENSECRET="${TOKENSECRET:-application-manager}"
+TOKENSECRETSUFFIX="${TOKENSECRETSUFFIX:-}"
 
 rm -f "${CSVFILE}" "${LOGFILE}" "${DONEFILE}" "${FAILFILE}"
 mkdir -p "${WORKDIR}"
@@ -50,9 +51,15 @@ EXPORT_CLUSTER() {
     return 2
   fi
 
-  TOKEN64="$(oc get secret -n "${CLUSTER}" "${TOKENSECRET}" -o jsonpath='{.data.token}' 2>/dev/null || true)"
+  if [ -n "${TOKENSECRETSUFFIX}" ]; then
+    SECRETNAME="${CLUSTER}${TOKENSECRETSUFFIX}"
+  else
+    SECRETNAME="${TOKENSECRET}"
+  fi
+
+  TOKEN64="$(oc get secret -n "${CLUSTER}" "${SECRETNAME}" -o jsonpath='{.data.token}' 2>/dev/null || true)"
   if [ -z "${TOKEN64}" ]; then
-    LOG "${CLUSTER}" "ERROR: missing token"
+    LOG "${CLUSTER}" "ERROR: missing token (secret=${SECRETNAME})"
     return 3
   fi
   TOKEN="$(printf '%s' "${TOKEN64}" | base64 -d)"
@@ -88,7 +95,7 @@ EXPORT_CLUSTER() {
   LOG "${CLUSTER}" "done rows=${ROWS}"
 }
 
-export ACM WORKDIR LOGFILE SUBSTYPELABEL TOKENSECRET
+export ACM WORKDIR LOGFILE SUBSTYPELABEL TOKENSECRET TOKENSECRETSUFFIX
 export -f LOG EXPORT_CLUSTER
 
 LOG "" "listing managedclusters"
@@ -110,7 +117,7 @@ xargs -r -P "${PARALLEL}" -I{} bash -c '
     RC=$?
     case ${RC} in
       2) REASON="missing apiserverurl claim" ;;
-      3) REASON="missing ${TOKENSECRET} token" ;;
+      3) REASON="missing token secret" ;;
       4) REASON="oc get nodes failed" ;;
       *) REASON="unknown error (exit=${RC})" ;;
     esac

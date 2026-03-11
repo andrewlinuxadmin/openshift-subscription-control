@@ -1,0 +1,147 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: subscription-db-insert
+  namespace: subscription-control
+data:
+  subscription-db-insert.sh: |+
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Distinct error codes
+    ERR_MISSING_ENV=10
+    ERR_MYSQL_NOT_FOUND=11
+    ERR_CSV_NOT_FOUND=12
+    ERR_DB_CONNECT=13
+    ERR_CREATE_TABLE=14
+    ERR_IMPORT_CSV=15
+    ERR_WAIT_FAILED=16
+    ERR_WAIT_TIMEOUT=17
+
+    : "${MYSQL_HOST:?Missing MYSQL_HOST}" || exit "${ERR_MISSING_ENV}"
+    : "${MYSQL_DATABASE:?Missing MYSQL_DATABASE}" || exit "${ERR_MISSING_ENV}"
+    : "${MYSQL_USER:?Missing MYSQL_USER}" || exit "${ERR_MISSING_ENV}"
+    : "${MYSQL_PASSWORD:?Missing MYSQL_PASSWORD}" || exit "${ERR_MISSING_ENV}"
+    : "${MYSQL_PORT:=3306}"
+
+    CSV_PATH="/tmp/data.csv"
+
+    DONE_FILE="/tmp/done.txt"
+    FAIL_FILE="/tmp/fail.txt"
+
+    : "${WAIT_INTERVAL_SECONDS:=5}"
+    : "${WAIT_MAX_SECONDS:=0}"
+    : "${RETENTION_DAYS:=730}"
+
+    MYSQL_CMD="mysql -h ${MYSQL_HOST} -P ${MYSQL_PORT} -u ${MYSQL_USER} -p${MYSQL_PASSWORD} -D ${MYSQL_DATABASE}"
+
+    if ! command -v mysql >/dev/null 2>&1; then
+      echo "ERROR: mysql not found in PATH" >&2
+      exit "${ERR_MYSQL_NOT_FOUND}"
+    fi
+
+    echo "INFO: Waiting for ${DONE_FILE} (fail=${FAIL_FILE})"
+    echo "INFO: Interval=${WAIT_INTERVAL_SECONDS}s Timeout=${WAIT_MAX_SECONDS}s (0=infinite)"
+
+    start_epoch="$(date +%s)"
+
+    while true; do
+      now_epoch="$(date +%s)"
+      elapsed="$((now_epoch - start_epoch))"
+
+      echo "WAIT: elapsed=${elapsed}s checking files..."
+
+      if [[ -f "${FAIL_FILE}" ]]; then
+        echo "ERROR: Detected fail file: ${FAIL_FILE}"
+        exit "${ERR_WAIT_FAILED}"
+      fi
+
+      if [[ -f "${DONE_FILE}" ]]; then
+        echo "INFO: Detected done file: ${DONE_FILE}"
+        break
+      fi
+
+      if [[ "${WAIT_MAX_SECONDS}" -gt 0 ]] && [[ "${elapsed}" -ge "${WAIT_MAX_SECONDS}" ]]; then
+        echo "ERROR: Timeout after ${WAIT_MAX_SECONDS}s waiting for ${DONE_FILE}"
+        exit "${ERR_WAIT_TIMEOUT}"
+      fi
+
+      echo "WAIT: sleeping ${WAIT_INTERVAL_SECONDS}s..."
+      sleep "${WAIT_INTERVAL_SECONDS}"
+    done
+
+    echo "INFO: Proceeding with database operations..."
+
+    if [[ ! -f "${CSV_PATH}" ]]; then
+      echo "ERROR: CSV not found: ${CSV_PATH}" >&2
+      exit "${ERR_CSV_NOT_FOUND}"
+    fi
+
+    # Remove empty lines from CSV (trailing newlines from cat *.csv can cause LOAD DATA errors)
+    sed -i '/^[[:space:]]*$/d' "${CSV_PATH}"
+
+    CSV_LINES="$(wc -l < "${CSV_PATH}" | tr -d ' ')"
+    echo "INFO: CSV content (${CSV_LINES} lines):"
+    echo "---"
+    cat "${CSV_PATH}"
+    echo "---"
+
+    if ! ${MYSQL_CMD} -e 'SELECT 1;' >/dev/null 2>&1; then
+      echo "ERROR: Cannot connect to ${MYSQL_DATABASE} at ${MYSQL_HOST}:${MYSQL_PORT}" >&2
+      exit "${ERR_DB_CONNECT}"
+    fi
+
+    if ! ${MYSQL_CMD} <<'SQL'
+    CREATE TABLE IF NOT EXISTS subscription (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      acm VARCHAR(255),
+      cluster VARCHAR(255),
+      clusterid VARCHAR(255),
+      type VARCHAR(255),
+      node VARCHAR(255),
+      cpu INTEGER,
+      providerid VARCHAR(512),
+      date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    SQL
+    then
+      echo "ERROR: Failed to create table subscription" >&2
+      exit "${ERR_CREATE_TABLE}"
+    fi
+
+    if ! ${MYSQL_CMD} --local-infile=1 <<SQL
+    CREATE TEMPORARY TABLE subscription_import (
+      acm VARCHAR(255),
+      cluster VARCHAR(255),
+      clusterid VARCHAR(255),
+      type VARCHAR(255),
+      node VARCHAR(255),
+      cpu INTEGER,
+      providerid VARCHAR(512)
+    );
+
+    LOAD DATA LOCAL INFILE '${CSV_PATH}'
+    INTO TABLE subscription_import
+    FIELDS TERMINATED BY ','
+    LINES TERMINATED BY '\n';
+
+    INSERT INTO subscription (acm, cluster, clusterid, type, node, cpu, providerid)
+    SELECT acm, cluster, clusterid, type, node, cpu, providerid
+    FROM subscription_import;
+
+    DROP TEMPORARY TABLE subscription_import;
+    SQL
+    then
+      echo "ERROR: Failed to import CSV into ${MYSQL_DATABASE}.subscription" >&2
+      exit "${ERR_IMPORT_CSV}"
+    fi
+
+    echo "INFO: Purging records older than ${RETENTION_DAYS} days..."
+
+    ${MYSQL_CMD} -e "DELETE FROM subscription WHERE date < NOW() - INTERVAL ${RETENTION_DAYS} DAY;"
+    DELETED_COUNT="$(${MYSQL_CMD} -sNe 'SELECT ROW_COUNT();')"
+
+    echo "INFO: Purged ${DELETED_COUNT} record(s) older than ${RETENTION_DAYS} days"
+
+    echo "OK: Table created (if needed), CSV imported, and retention applied (${RETENTION_DAYS} days) on ${MYSQL_DATABASE}.subscription"
+
