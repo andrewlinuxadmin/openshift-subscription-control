@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: subscription-control-api
+  namespace: subscription-control
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: subscription-control-api
+  template:
+    metadata:
+      labels:
+        app: subscription-control-api
+    spec:
+      containers:
+        - name: subscription-control-api
+          image: registry.redhat.io/rhel9/mysql-80:latest
+          command:
+            - python3
+            - /opt/app-root/subscription-control-api.py
+          ports:
+            - containerPort: 8080
+          env:
+            - name: MYSQL_HOST
+              value: mysql.subscription-control.svc
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_DATABASE
+              value: subscription
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: subscription-db-credentials
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: subscription-db-credentials
+                  key: MYSQL_PASSWORD
+            - name: RETENTION_DAYS
+              value: "730"
+            - name: API_PORT
+              value: "8080"
+            - name: API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: subscription-control-api-token
+                  key: API_TOKEN
+          volumeMounts:
+            - name: api-script
+              mountPath: /opt/app-root/subscription-control-api.py
+              subPath: subscription-control-api.py
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 5
+      volumes:
+        - name: api-script
+          configMap:
+            name: subscription-control-api

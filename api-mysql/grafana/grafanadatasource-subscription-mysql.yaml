@@ -1,0 +1,26 @@
+# MySQL datasource for the Grafana instance
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: subscription-mysql
+  namespace: subscription-control
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: subscription-control
+  datasource:
+    name: MySQL
+    uid: subscription-mysql
+    type: grafana-mysql-datasource
+    access: proxy
+    url: mysql.subscription-control.svc.cluster.local:3306
+    user: root
+    database: subscription
+    basicAuth: false
+    isDefault: true
+    jsonData:
+      maxOpenConns: 100
+      maxIdleConns: 100
+      connMaxLifetime: 14400
+    secureJsonData:
+      password: root

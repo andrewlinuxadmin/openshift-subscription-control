@@ -10,7 +10,7 @@ data:
 
     # Distinct error codes
     ERR_MISSING_ENV=10
-    ERR_PSQL_NOT_FOUND=11
+    ERR_MYSQL_NOT_FOUND=11
     ERR_CSV_NOT_FOUND=12
     ERR_DB_CONNECT=13
     ERR_CREATE_TABLE=14
@@ -18,12 +18,12 @@ data:
     ERR_WAIT_FAILED=16
     ERR_WAIT_TIMEOUT=17
 
-    : "${PGHOST:?Missing PGHOST}" || exit "${ERR_MISSING_ENV}"
-    : "${PGDATABASE:?Missing PGDATABASE}" || exit "${ERR_MISSING_ENV}"
-    : "${PGUSER:?Missing PGUSER}" || exit "${ERR_MISSING_ENV}"
-    : "${PGPASSWORD:?Missing PGPASSWORD}" || exit "${ERR_MISSING_ENV}"
-    : "${PGPORT:=5432}"
-    export PGPASSWORD
+    : "${MYSQL_HOST:?Missing MYSQL_HOST}" || exit "${ERR_MISSING_ENV}"
+    : "${MYSQL_DATABASE:?Missing MYSQL_DATABASE}" || exit "${ERR_MISSING_ENV}"
+    : "${MYSQL_USER:?Missing MYSQL_USER}" || exit "${ERR_MISSING_ENV}"
+    : "${MYSQL_PASSWORD:?Missing MYSQL_PASSWORD}" || exit "${ERR_MISSING_ENV}"
+    : "${MYSQL_PORT:=3306}"
+    MYSQL_SSL_CA="${MYSQL_SSL_CA:-}"
 
     CSV_PATH="/tmp/data.csv"
 
@@ -34,9 +34,16 @@ data:
     : "${WAIT_MAX_SECONDS:=0}"
     : "${RETENTION_DAYS:=730}"
 
-    if ! command -v psql >/dev/null 2>&1; then
-      echo "ERROR: psql not found in PATH" >&2
-      exit "${ERR_PSQL_NOT_FOUND}"
+    MYSQL_SSL_MODE="${MYSQL_SSL_MODE:-REQUIRED}"
+    MYSQL_CMD="mysql -h ${MYSQL_HOST} -P ${MYSQL_PORT} -u ${MYSQL_USER} -p${MYSQL_PASSWORD} -D ${MYSQL_DATABASE}"
+    if [[ -n "${MYSQL_SSL_CA}" ]]; then
+      MYSQL_CMD="${MYSQL_CMD} --ssl-ca=${MYSQL_SSL_CA} --ssl-mode=${MYSQL_SSL_MODE}"
+      echo "INFO: TLS enabled (CA=${MYSQL_SSL_CA}, mode=${MYSQL_SSL_MODE})"
+    fi
+
+    if ! command -v mysql >/dev/null 2>&1; then
+      echo "ERROR: mysql not found in PATH" >&2
+      exit "${ERR_MYSQL_NOT_FOUND}"
     fi
 
     echo "INFO: Waiting for ${DONE_FILE} (fail=${FAIL_FILE})"
@@ -76,7 +83,7 @@ data:
       exit "${ERR_CSV_NOT_FOUND}"
     fi
 
-    # Remove empty lines from CSV (trailing newlines from cat *.csv can cause COPY errors)
+    # Remove empty lines from CSV (trailing newlines from cat *.csv can cause LOAD DATA errors)
     sed -i '/^[[:space:]]*$/d' "${CSV_PATH}"
 
     CSV_LINES="$(wc -l < "${CSV_PATH}" | tr -d ' ')"
@@ -85,65 +92,62 @@ data:
     cat "${CSV_PATH}"
     echo "---"
 
-    if ! psql -v ON_ERROR_STOP=1 -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${PGDATABASE}" -c 'SELECT 1;' >/dev/null 2>&1; then
-      echo "ERROR: Cannot connect to ${PGDATABASE} at ${PGHOST}:${PGPORT}" >&2
+    if ! ${MYSQL_CMD} -e 'SELECT 1;' >/dev/null 2>&1; then
+      echo "ERROR: Cannot connect to ${MYSQL_DATABASE} at ${MYSQL_HOST}:${MYSQL_PORT}" >&2
       exit "${ERR_DB_CONNECT}"
     fi
 
-    if ! psql -v ON_ERROR_STOP=1 -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${PGDATABASE}" <<'SQL'
-    BEGIN;
-
+    if ! ${MYSQL_CMD} <<'SQL'
     CREATE TABLE IF NOT EXISTS subscription (
-      id BIGSERIAL PRIMARY KEY,
-      acm VARCHAR,
-      cluster VARCHAR,
-      clusterid VARCHAR,
-      type VARCHAR,
-      node VARCHAR,
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      acm VARCHAR(255),
+      cluster VARCHAR(255),
+      clusterid VARCHAR(255),
+      type VARCHAR(255),
+      node VARCHAR(255),
       cpu INTEGER,
-      providerid VARCHAR,
-      date TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      providerid VARCHAR(512),
+      date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
-
-    COMMIT;
     SQL
     then
       echo "ERROR: Failed to create table subscription" >&2
       exit "${ERR_CREATE_TABLE}"
     fi
 
-    if ! psql -v ON_ERROR_STOP=1 -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${PGDATABASE}" <<SQL
-    BEGIN;
-
-    CREATE TEMP TABLE subscription_import (
-      acm VARCHAR,
-      cluster VARCHAR,
-      clusterid VARCHAR,
-      type VARCHAR,
-      node VARCHAR,
+    if ! ${MYSQL_CMD} --local-infile=1 <<SQL
+    CREATE TEMPORARY TABLE subscription_import (
+      acm VARCHAR(255),
+      cluster VARCHAR(255),
+      clusterid VARCHAR(255),
+      type VARCHAR(255),
+      node VARCHAR(255),
       cpu INTEGER,
-      providerid VARCHAR
-    ) ON COMMIT DROP;
+      providerid VARCHAR(512)
+    );
 
-    \\copy subscription_import(acm,cluster,clusterid,type,node,cpu,providerid) FROM '${CSV_PATH}' WITH (FORMAT csv, HEADER false);
+    LOAD DATA LOCAL INFILE '${CSV_PATH}'
+    INTO TABLE subscription_import
+    FIELDS TERMINATED BY ','
+    LINES TERMINATED BY '\n';
 
     INSERT INTO subscription (acm, cluster, clusterid, type, node, cpu, providerid)
     SELECT acm, cluster, clusterid, type, node, cpu, providerid
     FROM subscription_import;
 
-    COMMIT;
+    DROP TEMPORARY TABLE subscription_import;
     SQL
     then
-      echo "ERROR: Failed to import CSV into ${PGDATABASE}.subscription" >&2
+      echo "ERROR: Failed to import CSV into ${MYSQL_DATABASE}.subscription" >&2
       exit "${ERR_IMPORT_CSV}"
     fi
 
     echo "INFO: Purging records older than ${RETENTION_DAYS} days..."
 
-    DELETED_COUNT="$(psql -v ON_ERROR_STOP=1 -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${PGDATABASE}" -tA \
-      -c "WITH d AS (DELETE FROM subscription WHERE date < NOW() - INTERVAL '${RETENTION_DAYS} days' RETURNING 1) SELECT count(*) FROM d;")"
+    ${MYSQL_CMD} -e "DELETE FROM subscription WHERE date < NOW() - INTERVAL ${RETENTION_DAYS} DAY;"
+    DELETED_COUNT="$(${MYSQL_CMD} -sNe 'SELECT ROW_COUNT();')"
 
     echo "INFO: Purged ${DELETED_COUNT} record(s) older than ${RETENTION_DAYS} days"
 
-    echo "OK: Table created (if needed), CSV imported, and retention applied (${RETENTION_DAYS} days) on ${PGDATABASE}.subscription"
+    echo "OK: Table created (if needed), CSV imported, and retention applied (${RETENTION_DAYS} days) on ${MYSQL_DATABASE}.subscription"
 

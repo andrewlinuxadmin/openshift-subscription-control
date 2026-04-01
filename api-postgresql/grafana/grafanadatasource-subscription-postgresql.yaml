@@ -1,0 +1,26 @@
+# PostgreSQL datasource for the Grafana instance
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: subscription-postgresql
+  namespace: subscription-control
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: subscription-control
+  datasource:
+    name: PostgreSQL
+    uid: subscription-postgresql
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: postgresql.subscription-control.svc.cluster.local:5432
+    user: postgres
+    database: subscription
+    basicAuth: false
+    isDefault: true
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      user: postgres
+    secureJsonData:
+      password: postgres

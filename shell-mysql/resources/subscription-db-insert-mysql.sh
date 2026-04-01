@@ -16,6 +16,7 @@ ERR_WAIT_TIMEOUT=17
 : "${MYSQL_USER:?Missing MYSQL_USER}" || exit "${ERR_MISSING_ENV}"
 : "${MYSQL_PASSWORD:?Missing MYSQL_PASSWORD}" || exit "${ERR_MISSING_ENV}"
 : "${MYSQL_PORT:=3306}"
+MYSQL_SSL_CA="${MYSQL_SSL_CA:-}"
 
 CSV_PATH="/tmp/data.csv"
 
@@ -26,7 +27,12 @@ FAIL_FILE="/tmp/fail.txt"
 : "${WAIT_MAX_SECONDS:=0}"
 : "${RETENTION_DAYS:=730}"
 
+MYSQL_SSL_MODE="${MYSQL_SSL_MODE:-REQUIRED}"
 MYSQL_CMD="mysql -h ${MYSQL_HOST} -P ${MYSQL_PORT} -u ${MYSQL_USER} -p${MYSQL_PASSWORD} -D ${MYSQL_DATABASE}"
+if [[ -n "${MYSQL_SSL_CA}" ]]; then
+  MYSQL_CMD="${MYSQL_CMD} --ssl-ca=${MYSQL_SSL_CA} --ssl-mode=${MYSQL_SSL_MODE}"
+  echo "INFO: TLS enabled (CA=${MYSQL_SSL_CA}, mode=${MYSQL_SSL_MODE})"
+fi
 
 if ! command -v mysql >/dev/null 2>&1; then
   echo "ERROR: mysql not found in PATH" >&2

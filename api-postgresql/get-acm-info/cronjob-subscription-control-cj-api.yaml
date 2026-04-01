@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: subscription-control-cj-api
+  namespace: subscription-control
+spec:
+  schedule: "0 23 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      activeDeadlineSeconds: 7200
+      template:
+        metadata:
+          labels:
+            app: subscription-control-cj-api
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: subscription-control-sa
+
+          volumes:
+            - name: subscription-cpu-api-cm
+              configMap:
+                name: subscription-cpu-api
+                defaultMode: 0755
+                items:
+                  - key: subscription-cpu-api.sh
+                    path: subscription-cpu-api.sh
+
+          containers:
+            - name: run-subscription-cpu
+              image: registry.redhat.io/openshift4/ose-cli:latest
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              env:
+                - name: ACMNAME
+                  value: acm-01
+                - name: API_URL
+                  value: http://subscription-control-api.subscription-control.svc:8080
+                - name: API_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: subscription-control-api-token
+                      key: API_TOKEN
+              volumeMounts:
+                - name: subscription-cpu-api-cm
+                  mountPath: /subscription-cpu
+                  readOnly: true
+              command:
+                - /bin/sh
+                - -c
+                - /subscription-cpu/subscription-cpu-api.sh
