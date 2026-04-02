@@ -51,15 +51,14 @@ EXPORT_CLUSTER() {
     return 2
   fi
 
-  if [ -n "${TOKENSECRETSUFFIX}" ]; then
-    SECRETNAME="${CLUSTER}${TOKENSECRETSUFFIX}"
-  else
-    SECRETNAME="${TOKENSECRET}"
+  TOKEN64="$(oc get secret -n "${CLUSTER}" "${TOKENSECRET}" -o jsonpath='{.data.token}' 2>/dev/null || true)"
+  if [ -z "${TOKEN64}" ] && [ -n "${TOKENSECRETSUFFIX}" ]; then
+    FALLBACK="${CLUSTER}${TOKENSECRETSUFFIX}"
+    LOG "${CLUSTER}" "secret ${TOKENSECRET} not found, trying ${FALLBACK}"
+    TOKEN64="$(oc get secret -n "${CLUSTER}" "${FALLBACK}" -o jsonpath='{.data.token}' 2>/dev/null || true)"
   fi
-
-  TOKEN64="$(oc get secret -n "${CLUSTER}" "${SECRETNAME}" -o jsonpath='{.data.token}' 2>/dev/null || true)"
   if [ -z "${TOKEN64}" ]; then
-    LOG "${CLUSTER}" "ERROR: missing token (secret=${SECRETNAME})"
+    LOG "${CLUSTER}" "ERROR: missing token (tried ${TOKENSECRET}${TOKENSECRETSUFFIX:+ and ${CLUSTER}${TOKENSECRETSUFFIX}})"
     return 3
   fi
   TOKEN="$(printf '%s' "${TOKEN64}" | base64 -d)"

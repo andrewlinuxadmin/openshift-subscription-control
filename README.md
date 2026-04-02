@@ -339,7 +339,7 @@ Shared credential at the root level:
 2. For each cluster, in parallel (`PARALLEL=8`):
    - Retrieves metadata: `clusterID`, `apiserverurl`
    - Retrieves label defined by `SUBSTYPELABEL` (default: `subscription-type`)
-   - Extracts the token from the Secret in the cluster's namespace. The Secret name is either `TOKENSECRET` (default: `application-manager`) or, when `TOKENSECRETSUFFIX` is set, `<cluster-name><suffix>` (e.g., `cluster-01-admin-token`)
+   - Extracts the token from the Secret in the cluster's namespace. First tries `TOKENSECRET` (default: `application-manager`). If not found and `TOKENSECRETSUFFIX` is set, falls back to `<cluster-name><suffix>` (e.g., `cluster-01-admin-token`)
    - Queries worker nodes (excluding infra nodes) via remote API
    - Writes one line per node in the format: `acm,cluster,clusterid,subtype,node,cpu,providerid`
 3. Merges partial CSVs into `/tmp/data.csv`
@@ -379,8 +379,8 @@ All variables below can be customized via `env` in the CronJob or Deployment man
 | `ACMNAME` | `acm` | ACM hub identifier used to tag collected data |
 | `PARALLEL` | `8` | Number of clusters processed in parallel |
 | `SUBSTYPELABEL` | `subscription-type` | ManagedCluster label name used to read the subscription type |
-| `TOKENSECRET` | `application-manager` | Name of the Secret in each cluster's namespace containing the authentication token (used when `TOKENSECRETSUFFIX` is empty) |
-| `TOKENSECRETSUFFIX` | *(empty)* | When set, the Secret name becomes `<cluster-name><suffix>` instead of `TOKENSECRET` |
+| `TOKENSECRET` | `application-manager` | Name of the Secret to try first in each cluster's namespace |
+| `TOKENSECRETSUFFIX` | *(empty)* | Fallback: when set and `TOKENSECRET` is not found, tries `<cluster-name><suffix>` |
 
 ### subscription-db-insert-postgresql.sh (container `run-subscription-db-insert`)
 
@@ -417,8 +417,8 @@ All variables below can be customized via `env` in the CronJob or Deployment man
 | `ACMNAME` | `acm` | ACM hub identifier |
 | `PARALLEL` | `8` | Clusters processed in parallel |
 | `SUBSTYPELABEL` | `subscription-type` | ManagedCluster label for subscription type |
-| `TOKENSECRET` | `application-manager` | Secret name for authentication token |
-| `TOKENSECRETSUFFIX` | *(empty)* | When set, Secret name = `<cluster><suffix>` |
+| `TOKENSECRET` | `application-manager` | Secret name to try first for authentication token |
+| `TOKENSECRETSUFFIX` | *(empty)* | Fallback: when set and `TOKENSECRET` not found, tries `<cluster><suffix>` |
 | `API_URL` | *(required)* | Base URL of the subscription API |
 | `API_TOKEN` | *(required)* | Bearer token for API authentication (via `secretKeyRef`) |
 
