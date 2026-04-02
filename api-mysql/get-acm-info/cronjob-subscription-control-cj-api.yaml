@@ -49,6 +49,8 @@ spec:
                     secretKeyRef:
                       name: subscription-control-api-token
                       key: API_TOKEN
+                - name: LOG_LEVEL
+                  value: info
               volumeMounts:
                 - name: subscription-cpu-api-cm
                   mountPath: /subscription-cpu

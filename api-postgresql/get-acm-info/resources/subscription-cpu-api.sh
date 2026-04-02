@@ -12,6 +12,7 @@ TOKENSECRET="${TOKENSECRET:-application-manager}"
 TOKENSECRETSUFFIX="${TOKENSECRETSUFFIX:-}"
 API_URL="${API_URL:?Missing API_URL}"
 API_TOKEN="${API_TOKEN:?Missing API_TOKEN}"
+LOG_LEVEL="${LOG_LEVEL:-info}"
 
 rm -f "${CSVFILE}" "${LOGFILE}"
 mkdir -p "${WORKDIR}"
@@ -28,6 +29,11 @@ LOG() {
   fi
   echo "${MSG}"
   echo "${MSG}" >> "${LOGFILE}"
+}
+
+DEBUG() {
+  [ "${LOG_LEVEL}" = "debug" ] || return 0
+  LOG "$@"
 }
 
 EXPORT_CLUSTER() {
@@ -92,10 +98,21 @@ EXPORT_CLUSTER() {
 
   ROWS="$(wc -l < "${OUTFILE}" | tr -d ' ')"
   LOG "${CLUSTER}" "done rows=${ROWS}"
+  if [ "${LOG_LEVEL}" = "debug" ] && [ -s "${OUTFILE}" ]; then
+    DEBUG "${CLUSTER}" "CSV content:"
+    while IFS= read -r LINE; do
+      DEBUG "${CLUSTER}" "  ${LINE}"
+    done < "${OUTFILE}"
+  fi
 }
 
-export ACM WORKDIR LOGFILE SUBSTYPELABEL TOKENSECRET TOKENSECRETSUFFIX
-export -f LOG EXPORT_CLUSTER
+export ACM WORKDIR LOGFILE SUBSTYPELABEL TOKENSECRET TOKENSECRETSUFFIX LOG_LEVEL
+export -f LOG DEBUG EXPORT_CLUSTER
+
+LOG "" "log_level=${LOG_LEVEL}"
+DEBUG "" "ACM=${ACM} API_URL=${API_URL}"
+DEBUG "" "TOKENSECRET=${TOKENSECRET} TOKENSECRETSUFFIX=${TOKENSECRETSUFFIX:-<empty>}"
+DEBUG "" "SUBSTYPELABEL=${SUBSTYPELABEL} PARALLEL=${PARALLEL}"
 
 LOG "" "listing managedclusters"
 
@@ -188,11 +205,26 @@ END { printf "]" }
 PAYLOAD_SIZE="$(wc -c < "${PAYLOAD}" | tr -d ' ')"
 LOG "" "sending ${FINAL_ROWS} records to ${API_URL}/api/subscriptions (${PAYLOAD_SIZE} bytes)"
 
-HTTP_CODE="$(curl -s -o /tmp/api_response.txt -w '%{http_code}' \
+if [ "${LOG_LEVEL}" = "debug" ]; then
+  LOG "" "DEBUG --- payload begin ---"
+  cat "${PAYLOAD}"
+  echo
+  LOG "" "DEBUG --- payload end ---"
+  CURL_VERBOSE="-v"
+else
+  CURL_VERBOSE=""
+fi
+
+if ! HTTP_CODE="$(curl -sS --connect-timeout 30 --max-time 300 \
+  ${CURL_VERBOSE} -o /tmp/api_response.txt -w '%{http_code}' \
   -X POST "${API_URL}/api/subscriptions" \
   -H 'Content-Type: application/json' \
   -H "Authorization: Bearer ${API_TOKEN}" \
-  -d @"${PAYLOAD}")"
+  -d @"${PAYLOAD}" 2>/tmp/api_curl_err.txt)"; then
+  CURL_ERR="$(cat /tmp/api_curl_err.txt)"
+  LOG "" "ERROR: curl failed — ${CURL_ERR}"
+  exit 1
+fi
 
 API_BODY="$(cat /tmp/api_response.txt)"
 

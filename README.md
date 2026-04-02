@@ -421,6 +421,7 @@ All variables below can be customized via `env` in the CronJob or Deployment man
 | `TOKENSECRETSUFFIX` | *(empty)* | Fallback: when set and `TOKENSECRET` not found, tries `<cluster><suffix>` |
 | `API_URL` | *(required)* | Base URL of the subscription API |
 | `API_TOKEN` | *(required)* | Bearer token for API authentication (via `secretKeyRef`) |
+| `LOG_LEVEL` | `info` | Log level: `info` (default) or `debug`. In debug mode, shows the JSON payload before sending and enables curl verbose output |
 
 ### subscription-control-api.py — PostgreSQL variant (Deployment — runs on any cluster)
 
