@@ -215,7 +215,7 @@ else
   CURL_VERBOSE=""
 fi
 
-if ! HTTP_CODE="$(curl -sS --connect-timeout 30 --max-time 300 \
+if ! HTTP_CODE="$(curl -sS -k --connect-timeout 30 --max-time 300 \
   ${CURL_VERBOSE} -o /tmp/api_response.txt -w '%{http_code}' \
   -X POST "${API_URL}/api/subscriptions" \
   -H 'Content-Type: application/json' \
