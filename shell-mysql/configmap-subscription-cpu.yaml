@@ -43,18 +43,17 @@ data:
 
       LOG "${CLUSTER}" "starting"
 
-      META="$(oc get managedcluster "${CLUSTER}" -o jsonpath="{.metadata.labels.${SUBSTYPELABEL}}{\"|\"}{.metadata.labels.clusterID}{\"|\"}{range .status.clusterClaims[*]}{.name}{\"=\"}{.value}{\"\n\"}{end}")"
+      META="$(oc get managedcluster "${CLUSTER}" -o jsonpath="{.metadata.labels.${SUBSTYPELABEL}}{\"|\"}{.metadata.labels.clusterID}{\"|\"}{.spec.url}")"
 
       SUBTYPE="${META%%|*}"
       META="${META#*|}"
       CLUSTERID="${META%%|*}"
-      CLAIMS="${META#*|}"
+      APIURL="${META#*|}"
 
       [ -n "${SUBTYPE}" ] || SUBTYPE="no-label"
 
-      APIURL="$(printf '%s\n' "${CLAIMS}" | awk -F= '$1=="apiserverurl.openshift.io"{print $2; exit}')"
       if [ -z "${APIURL}" ]; then
-        LOG "${CLUSTER}" "ERROR: missing apiserverurl"
+        LOG "${CLUSTER}" "ERROR: missing .spec.url"
         return 2
       fi
 
