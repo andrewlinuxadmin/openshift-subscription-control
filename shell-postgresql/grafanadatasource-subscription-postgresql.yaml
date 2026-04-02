@@ -11,7 +11,7 @@ spec:
   datasource:
     name: PostgreSQL
     uid: subscription-postgresql
-    type: grafana-postgresql-datasource
+    type: postgres
     access: proxy
     url: postgresql.subscription-control.svc.cluster.local:5432
     user: postgres
