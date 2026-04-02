@@ -36,7 +36,7 @@ EXPORT_CLUSTER() {
 
   LOG "${CLUSTER}" "starting"
 
-  META="$(oc get managedcluster "${CLUSTER}" -o jsonpath="{.metadata.labels.${SUBSTYPELABEL}}{\"|\"}{.metadata.labels.clusterID}{\"|\"}{.spec.url}")"
+  META="$(oc get managedcluster "${CLUSTER}" -o jsonpath="{.metadata.labels.${SUBSTYPELABEL}}{\"|\"}{.metadata.labels.clusterID}{\"|\"}{.spec.managedClusterClientConfigs[0].url}")"
 
   SUBTYPE="${META%%|*}"
   META="${META#*|}"
@@ -46,7 +46,7 @@ EXPORT_CLUSTER() {
   [ -n "${SUBTYPE}" ] || SUBTYPE="no-label"
 
   if [ -z "${APIURL}" ]; then
-    LOG "${CLUSTER}" "ERROR: missing .spec.url"
+    LOG "${CLUSTER}" "ERROR: missing managedClusterClientConfigs URL"
     return 2
   fi
 
@@ -114,7 +114,7 @@ xargs -r -P "${PARALLEL}" -I{} bash -c '
   else
     RC=$?
     case ${RC} in
-      2) REASON="missing apiserverurl claim" ;;
+      2) REASON="missing managedClusterClientConfigs URL" ;;
       3) REASON="missing token secret" ;;
       4) REASON="oc get nodes failed" ;;
       *) REASON="unknown error (exit=${RC})" ;;

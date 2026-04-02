@@ -337,7 +337,7 @@ Shared credential at the root level:
 
 1. Lists all managed clusters in ACM (excluding `local-cluster`)
 2. For each cluster, in parallel (`PARALLEL=8`):
-   - Retrieves metadata: `clusterID`, API URL (from `.spec.url`)
+   - Retrieves metadata: `clusterID`, API URL (from `.spec.managedClusterClientConfigs[0].url`)
    - Retrieves label defined by `SUBSTYPELABEL` (default: `subscription-type`)
    - Extracts the token from the Secret in the cluster's namespace. First tries `TOKENSECRET` (default: `application-manager`). If not found and `TOKENSECRETSUFFIX` is set, falls back to `<cluster-name><suffix>` (e.g., `cluster-01-admin-token`)
    - Queries worker nodes (excluding infra nodes) via remote API
